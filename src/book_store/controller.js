@@ -47,13 +47,15 @@ const addBook = (req, res) => {
 const updateBook = (req, res) => {
     const id = parseInt(req.params.id);
     const { title, publication_year, pages, price} = req.body;
+    const last_update = new Date();
     pool.query(queries.getBookById, [id], (error, results) => {
         const noBookFound = !results.rows.length;
         if (noBookFound){
             res.send("Book doesn't exist in the database.")
         }
 
-        pool.query(queries.updateBook, [title, publication_year, pages, price, id], (error, results) => {
+        pool.query(queries.updateBook, [title, publication_year, pages, price, last_update, id], 
+        (error, results) => {
             if (error) throw error;
             res.status(200).send(`Book updated with ID: ${id}`);
         });
@@ -61,19 +63,39 @@ const updateBook = (req, res) => {
 };
 
 
-const deleteBook = (req, res) => {
+const deleteBook = async (req, res) => {
     const id = parseInt(req.params.id);
-    pool.query(queries.getBookById, [id], (error, results) => {
-        const noBookFound = !results.rows.length;
-        if (noBookFound){
-            res.send("Book doesn't exist in the database.")
-        }
-        pool.query(queries.deleteBook, [id], (error, results) => {
-            if (error) throw error;
-            res.status(200).send(`Book deleted with id: ${id}`);
-        });
-    });
-};
+  
+    try {
+      await pool.query('BEGIN');
+  
+      // Check if the book exists
+      const bookResult = await pool.query(queries.getBookById, [id]);
+      const bookExists = bookResult.rows.length > 0;
+  
+      if (!bookExists) {
+        await pool.query('ROLLBACK');
+        return res.status(404).send("Book doesn't exist in the database.");
+      }
+
+      await pool.query(queries.deleteBookPublisherByBookId, [id]);
+      await pool.query(queries.deleteBookAuthorByBookId, [id]);
+      await pool.query(queries.deletePaymentById, [id]);
+      await pool.query(queries.deleteBookOrderByBookId, [id]);
+      await pool.query(queries.deleteInventoryByBookId, [id]);
+  
+      await pool.query(queries.deleteBook, [id]);
+  
+      await pool.query('COMMIT');
+      res.status(200).send(`Book deleted with id: ${id}`);
+    } catch (error) {
+      await pool.query('ROLLBACK');
+      console.error(error);
+      res.status(500).send('An error occurred during book deletion.');
+    }
+  };
+  
+  
 
 const getStore = (req, res) => {
     pool.query(queries.getStore, (error, results) => {
